@@ -1,16 +1,3 @@
-//! sysbadge — цветная «табличка» с данными системы для Linux-терминала.
-//!
-//!   ULTRA ROBOTICS CORP        -> hostname
-//!   BUILT TO REINDUSTRIALIZE   -> имя текущего пользователя
-//!   LA 1/5/15                  -> load average
-//!   USA                        -> текущая раскладка клавиатуры
-//!   24/7 RUN TIME              -> uptime + текущее время
-//!
-//! Без внешних зависимостей: только std, /proc и стандартные утилиты окружения.
-//! Флаги: -w/--watch — обновлять каждую секунду;
-//!        -c/--color <orange|blue|red|white|#RRGGBB> — цвет (по умолчанию orange);
-//!        NO_COLOR=1 — без цвета.
-
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -18,11 +5,9 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-// ───────────────────────────── цвет ─────────────────────────────
 
 const COLOR_NAMES: &str = "orange, blue, red, white или #RRGGBB";
 
-/// Название цвета -> (RGB для truecolor, номер в 256-цветной палитре).
 fn parse_color(name: &str) -> Option<((u8, u8, u8), u8)> {
     match name.to_lowercase().as_str() {
         "orange" => Some(((255, 90, 0), 202)),
@@ -56,8 +41,6 @@ fn color_code((rgb, idx): ((u8, u8, u8), u8)) -> String {
 fn reset() -> &'static str {
     if env::var_os("NO_COLOR").is_some() { "" } else { "\x1b[0m" }
 }
-
-// ─────────────────────────── данные ────────────────────────────
 
 fn hostname() -> String {
     fs::read_to_string("/proc/sys/kernel/hostname")
@@ -117,7 +100,6 @@ fn run(cmd: &str, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// "English (US)" / "Russian" / "us" / "ru" -> "US" / "RU"
 fn short_layout(name: &str) -> String {
     let n = name.trim().trim_matches('\'').trim_matches('"');
     let lower = n.to_lowercase();
@@ -136,12 +118,10 @@ fn short_layout(name: &str) -> String {
             }
         }
     }
-    // "us", "ru", "us(intl)", "xkb:us::eng"
     let code = n.trim_start_matches("xkb:").split(|c| c == '(' || c == ':' || c == '+').next().unwrap_or(n);
     code.to_uppercase()
 }
 
-/// Текущая (активная) раскладка: Hyprland → Sway → KDE → GNOME → X11 → конфиг системы.
 fn keyboard_layout() -> String {
     // Hyprland
     if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
@@ -209,9 +189,6 @@ fn keyboard_layout() -> String {
     "??".into()
 }
 
-// ──────────────────── локальное время без крейтов ────────────────────
-
-/// Смещение UTC для момента `now` из TZif-файла (/etc/localtime).
 fn tz_offset(now: i64) -> i64 {
     let path = env::var("TZ")
         .ok()
@@ -233,7 +210,6 @@ fn tz_offset(now: i64) -> i64 {
 
     let c1 = counts(&data);
     let v1_len = c1[3] * 5 + c1[4] * 6 + c1[5] + c1[2] * 8 + c1[1] + c1[0];
-    // Версия 2+: идём на 64-битный блок
     let (hdr, tsize) = if data[4] >= b'2' && data.len() > 44 + v1_len + 44 {
         (44 + v1_len, 8)
     } else {
@@ -272,9 +248,6 @@ fn local_time() -> String {
     format!("{:02}:{:02}:{:02}", t / 3600, t % 3600 / 60, t % 60)
 }
 
-// ─────────────────────── эмблемы (пиксель-арт) ───────────────────────
-
-/// Пиксельная сетка (4 строки) -> 2 строки терминала из полублоков ▀ ▄ █.
 fn pixels(grid: &[&str; 4]) -> [String; 2] {
     let mut out = [String::new(), String::new()];
     for (line, pair) in out.iter_mut().zip([(0, 1), (2, 3)]) {
@@ -292,7 +265,6 @@ fn pixels(grid: &[&str; 4]) -> [String; 2] {
     out
 }
 
-/// Левая эмблема: два рубленых блока, штрихованный блок и ™.
 fn left_emblem() -> [String; 2] {
     let a = pixels(&[".######.", "########", "########", ".######."]);
     let b = pixels(&["######..", "########", "###..###", "###..###"]);
@@ -304,18 +276,15 @@ fn left_emblem() -> [String; 2] {
     ]
 }
 
-/// Правая эмблема: круг между двумя стойками.
 fn right_emblem() -> [String; 2] {
     pixels(&["##..##..##", "##.####.##", "##.####.##", "##..##..##"])
 }
 
-// ─────────────────────────── вывод ────────────────────────────
 
 fn width(s: &str) -> usize {
     s.chars().count()
 }
 
-/// Растягивает слова на заданную ширину, как «© 2026   -   NYC» на картинке.
 fn justify(words: &[&str], w: usize) -> String {
     let used: usize = words.iter().map(|x| width(x)).sum();
     let gaps = words.len().saturating_sub(1).max(1);
@@ -351,7 +320,6 @@ fn render(color: &str) -> String {
     let right = right_emblem();
     let arrows = ">>>";
 
-    // колонка центрального текста: правее эмблемы и правее «UP … >>>»
     let mid_col = (width(&left[0]).max(width(&left[1])) + 3).max(width(&run) + 2 + 3 + 2);
     let la_min = width("LA") + la.iter().map(|x| width(x)).sum::<usize>() + 2 + 6 * 2;
     let mid_w = width(&host).max(la_min).max(width(&user) + 2 + 3 + 2);
@@ -362,7 +330,6 @@ fn render(color: &str) -> String {
     let mut l1 = Vec::new();
     let mut l2 = Vec::new();
 
-    // верхние две строки: эмблема | hostname / load average | эмблема
     place(&mut l0, 0, &left[0]);
     place(&mut l1, 0, &left[1]);
     place(&mut l0, mid_col, &host);
@@ -372,7 +339,6 @@ fn render(color: &str) -> String {
     place(&mut l0, total - width(&right[0]), &right[0]);
     place(&mut l1, total - width(&right[1]), &right[1]);
 
-    // нижняя строка: UP … >>> USER >>> (LAYOUT)
     place(&mut l2, 0, &run);
     place(&mut l2, mid_col - 3 - 2, arrows);
     place(&mut l2, mid_col, &user);
@@ -437,7 +403,6 @@ fn main() {
         let _ = writeln!(stdout, "{}", render(&color));
         return;
     }
-    // режим наблюдения: перерисовываем раз в секунду, Ctrl+C — выход
     loop {
         let _ = write!(stdout, "\x1b[H\x1b[2J{}\n", render(&color));
         let _ = stdout.flush();
